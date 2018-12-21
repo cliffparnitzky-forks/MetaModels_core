@@ -25,6 +25,7 @@ use Contao\StringUtil;
 use Doctrine\DBAL\Connection;
 use MetaModels\IFactory;
 use MetaModels\IMetaModel;
+use MetaModels\ITranslatedMetaModel;
 
 /**
  * This class obtains information from the database about input screens.
@@ -105,11 +106,17 @@ class InputScreenInformationBuilder
         }
         $caption     = ['' => $metaModel->getName()];
         $description = ['' => $metaModel->getName()];
+        $fallback    = null;
+        if ($metaModel instanceof ITranslatedMetaModel) {
+            $fallback = $metaModel->getMainLanguage();
+        } elseif ($metaModel->isTranslated(false)) {
+            $fallback = $metaModel->getFallbackLanguage();
+        }
         foreach (StringUtil::deserialize($screen['backendcaption'], true) as $languageEntry) {
             $langCode               = $languageEntry['langcode'];
             $caption[$langCode]     = !empty($label = $languageEntry['label']) ? $label : $caption[''];
             $description[$langCode] = !empty($title = $languageEntry['description']) ? $title : $description[''];
-            if ($metaModel->getFallbackLanguage() === $langCode) {
+            if ($fallback === $langCode) {
                 $caption['']     = $label;
                 $description[''] = $title;
             }
@@ -302,15 +309,8 @@ class InputScreenInformationBuilder
     private function convertLegends(array $properties, IMetaModel $metaModel, array $conditions): array
     {
         $result = [];
-        $label  = [];
-        if ($trans = $metaModel->isTranslated()) {
-            foreach ($metaModel->getAvailableLanguages() as $availableLanguage) {
-                $label[$availableLanguage] = $metaModel->getName();
-            }
-        } else {
-            $label[$metaModel->getActiveLanguage()] = $metaModel->getName();
-        }
-
+        $trans  = (($metaModel instanceof ITranslatedMetaModel) || $metaModel->isTranslated(false));
+        $label  = $this->buildLabel($trans, $metaModel);
         $legend = [
             'label'      => $label,
             'hide'       => false,
@@ -345,6 +345,32 @@ class InputScreenInformationBuilder
         }
 
         return $result;
+    }
+
+    /**
+     * Build the label.
+     *
+     * @param bool       $isTranslated Flag if the MetaModel is translated.
+     * @param IMetaModel $metaModel    The MetaModel instance.
+     *
+     * @return array
+     *
+     * @SuppressWarnings(PHPMD.Superglobals)
+     * @SuppressWarnings(PHPMD.CamelCaseVariableName)
+     */
+    private function buildLabel(bool $isTranslated, IMetaModel $metaModel): array
+    {
+        if ($isTranslated) {
+            $label = [];
+            foreach (($metaModel instanceof ITranslatedMetaModel)
+                ? $metaModel->getLanguages()
+                : $metaModel->getAvailableLanguages() as $availableLanguage) {
+                $label[$availableLanguage] = $metaModel->getName();
+            }
+            return $label;
+        }
+
+        return [$GLOBALS['TL_LANGUAGE'] => $metaModel->getName()];
     }
 
     /**
