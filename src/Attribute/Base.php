@@ -26,6 +26,7 @@
 namespace MetaModels\Attribute;
 
 use MetaModels\IMetaModel;
+use MetaModels\ITranslatedMetaModel;
 use MetaModels\Render\Setting\ISimple as ISimpleRenderSetting;
 use MetaModels\Render\Setting\Simple;
 use MetaModels\Render\Template;
@@ -54,7 +55,7 @@ abstract class Base implements IAttribute
     protected $arrData = array();
 
     /**
-     * Instantiate an MetaModel attribute.
+     * Instantiate a MetaModel attribute.
      *
      * Note that you should not use this directly but use the factory classes to instantiate attributes.
      *
@@ -66,6 +67,19 @@ abstract class Base implements IAttribute
      */
     public function __construct(IMetaModel $objMetaModel, $arrData = array())
     {
+        if (!($objMetaModel instanceof ITranslatedMetaModel) && $objMetaModel->isTranslated(false)) {
+            // @codingStandardsIgnoreStart
+            @\trigger_error(
+                sprintf(
+                    'Support for translated "\MetaModel\IMetamodel" instances is deprecated since MetaModels 2.1 ' .
+                    'and to be removed in 3.0. The MetaModel "%s" must implement "\MetaModels\ITranslatedMetaModel".',
+                    $objMetaModel->getTableName()
+                ),
+                E_USER_DEPRECATED
+            );
+            // @codingStandardsIgnoreEnd
+        }
+
         // Meta information.
         foreach (array_intersect($this->getAttributeSettingNames(), array_keys($arrData)) as $strSettingName) {
             $this->set($strSettingName, $arrData[$strSettingName]);
@@ -102,7 +116,12 @@ abstract class Base implements IAttribute
     public function getName()
     {
         if (is_array($this->arrData['name'])) {
-            return $this->getLangValue($this->get('name')) ?: $this->getColName();
+            $metaModel = $this->getMetaModel();
+            return $this->getLangValue(
+                $this->get('name'),
+                ($metaModel instanceof ITranslatedMetaModel)
+                    ? $metaModel->getLanguage() : $metaModel->getActiveLanguage()
+            ) ?: $this->getColName();
         }
         return $this->arrData['name'] ?: $this->getColName();
     }
@@ -115,27 +134,53 @@ abstract class Base implements IAttribute
      *
      * @param array  $arrValues   The array holding all language values in the form array('langcode' => $varValue).
      *
-     * @param string $strLangCode The language code of the language to fetch. Optional, if not given,
-     *                            $GLOBALS['TL_LANGUAGE'] is used.
+     * @param string $strLangCode The language code of the language to fetch.
      *
      * @return mixed|null the value for the given language or the fallback language, NULL if neither is present.
+     *
+     * @SuppressWarnings(PHPMD.Superglobals)
+     * @SuppressWarnings(PHPMD.CamelCaseVariableName)
      */
     protected function getLangValue($arrValues, $strLangCode = null)
     {
-        if (!($this->getMetaModel()->isTranslated() && is_array($arrValues))) {
+        $metaModel = $this->getMetaModel();
+        // Not a valid lookup array, exit.
+        if (!is_array($arrValues)) {
             return $arrValues;
         }
 
-        if ($strLangCode === null) {
-            return $this->getLangValue($arrValues, $this->getMetaModel()->getActiveLanguage());
+        if (null === $strLangCode) {
+            // @codingStandardsIgnoreStart
+            @\trigger_error(
+                sprintf(
+                    'Not passing the language code to "%s" is deprecated since MetaModels 2.1 and will fail in 3.0 ',
+                    __METHOD__
+                ),
+                E_USER_DEPRECATED
+            );
+            // @codingStandardsIgnoreEnd
+            $strLangCode = $GLOBALS['TL_LANGUAGE'];
+        }
+
+        // Not translated, exit.
+        if (!($metaModel instanceof ITranslatedMetaModel) && !$metaModel->isTranslated(false)) {
+            return $arrValues;
         }
 
         if (array_key_exists($strLangCode, $arrValues)) {
             return $arrValues[$strLangCode];
         }
-
         // Language code not set, use fallback.
-        return $arrValues[$this->getMetaModel()->getFallbackLanguage()];
+        if ($metaModel instanceof ITranslatedMetaModel) {
+            $strLangCode = $metaModel->getMainLanguage();
+        } else {
+            $strLangCode = $metaModel->getFallbackLanguage();
+        }
+        if (array_key_exists($strLangCode, $arrValues)) {
+            return $arrValues[$strLangCode];
+        }
+
+        return null;
     }
 
     /**
@@ -300,8 +345,8 @@ abstract class Base implements IAttribute
         if (empty($GLOBALS['TL_LANG'][$this->getMetaModel()->getTableName()][$this->getColName()])) {
             $GLOBALS['TL_LANG'][$this->getMetaModel()->getTableName()][$this->getColName()] = array
             (
-                $this->getLangValue($this->get('name')),
-                $this->getLangValue($this->get('description')),
+                $this->getLangValue($this->get('name'), $GLOBALS['TL_LANGUAGE']),
+                $this->getLangValue($this->get('description'), $GLOBALS['TL_LANGUAGE']),
             );
         }
     }
